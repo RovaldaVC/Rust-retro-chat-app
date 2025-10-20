@@ -61,8 +61,49 @@ async fn main() -> Result<(), Box<dyn Error>> {
         //splitting the socket into reader and writer
         let (reader, mut writer) = socket.split();
         let mut reader = BufReader::new(reader);
+
+        //read the username sent by client.
         let mut username =  String::new();
-    } 
+        reader.read_line(&mut username).await.unwrap();
+        let username = username.trim().to_string();
+
+        //send a system notification "user joined the chat."
+        let join_message = ChatMessage{
+            username: username.clone(),
+            content: "joined the chat.".to_string(),
+            timestamp: Local::now().format("%H:&M:%S").to_string(),
+            message_type: MessageType::SystemNotification,
+        };
+        let join_json = serde_json::to_string(&join_message).unwrap();
+        tx.send(join_json).unwrap();
+        
+        //a buffer for incoming messages from the client.
+        let mut line = String::new();
+        loop {
+            tokio::select! {
+                result = reader.read_line(&mut line) =>{
+                    if result.unwrap() == 0 {
+                        break;
+                    }
+                    //create and broadcast user message
+                    let message = ChatMessage{
+                        username: username.clone(),
+                        content: line.trim().to_string(),
+                        timestamp: Local::now().format("%H:%M:%S").to_string(),
+                        message_type: MessageType::UserMessage,
+                    };
+                    let json = serde_json::to_string(&message).unwrap();
+                    tx.send(json).unwrap();
+                    line.clear();
+                }
+                //Handle the incoming broadcast and send them to the client.
+                result = rx.recv() => {
+                    let message = result.unwrap();
+                    writer.write_all(message.as_bytes()).await.unwrap();
+                }
+            }
+        }
+    }
 }
 
-// ctrl + shift + a opens a comment place for you. 
+// ctrl + shift + a opens a comment place for you. /*  */
