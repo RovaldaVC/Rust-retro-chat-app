@@ -4,9 +4,9 @@ use tokio::{
     sync::broadcast,
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
 };
-use serde::{Deserialize, Serialize, de::Error};
+use serde::{Deserialize, Serialize};
+use std::{error::Error, io::BufWriter};
 use chrono::Local;
-use std::error:Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 ///this is an attribute instructing the compiler to automatically generate implemations for the 4 traits.
@@ -40,6 +40,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (tx, _) = broadcast::channel::<String>(100);
     
     loop{
+        //accepting the new connection
         let (socket, addr) = listener.accept().await?;
+
+        //display the connection onformation
+        //Local is for time: (Hour, Minute, Second)
+        println!("new connection {}", Local::now().format("%H:%M:%S"));
+        println!("Address: {}", addr);
+
+        //clone sender for this connection and subscribe a receiver
+        let tx = tx.clone();
+        let rx = tx.subscribe();
     }
+    //Fnction to handle the client connection
+    async fn handle_connection(
+        mut socket: TcpStream,
+        tx: broadcast::Sender<String>,
+        mut rx: broadcast::Receiver<String>
+    ){
+        //splitting the socket into reader and writer
+        let (reader, mut writer) = socket.split();
+        let mut reader = BufReader::new(reader);
+        let mut username =  String::new();
+    } 
 }
+
+// ctrl + shift + a opens a comment place for you. 
