@@ -51,7 +51,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         //clone sender for this connection and subscribe a receiver
         let tx = tx.clone();
         let rx = tx.subscribe();
+        
+        tokio::spawn(async move{
+            handle_connection(socket, tx, rx).await                              
+        });
     }
+}
+
     //Fnction to handle the client connection
     async fn handle_connection(
         mut socket: TcpStream,
@@ -100,10 +106,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 result = rx.recv() => {
                     let message = result.unwrap();
                     writer.write_all(message.as_bytes()).await.unwrap();
+                    writer.write_all(b"\n").await.unwrap();
                 }
             }
         }
-    }
+        // Send a sys notification indicating the user has left the chat
+        let leave_message = ChatMessage{
+            username: username.clone(),
+            content: "Left the chat.".to_string(),
+            timestamp: Local::now().format("%H:&M:%S").to_string(),
+            message_type: MessageType::SystemNotification,
+        };
+        let leave_json = serde_json::to_string(&leave_message).unwrap();
+        tx.send(leave_json).unwrap();
+    
+        // log disconnection info to the terminal
+        println!("{} {} disconnected.", Local::now().format("%H:%M:%S"), username);
 }
 
 // ctrl + shift + a opens a comment place for you. /*  */
