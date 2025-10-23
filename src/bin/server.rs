@@ -1,11 +1,10 @@
-use cursive::views::ListChild;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::broadcast,
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
 };
 use serde::{Deserialize, Serialize};
-use std::{error::Error, io::BufWriter};
+use std::{error::Error};
 use chrono::Local;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
