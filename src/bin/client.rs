@@ -1,6 +1,6 @@
 //importing the various moudles from the cursive library for UI dev.
 use cursive::{
-    Cursive, align::HAlign, event::Key, style::Rgb, theme::{BaseColor, BorderStyle, Color, Palette, PaletteColor, Theme}, traits::*, views::{Dialog, DummyView, EditView, LinearLayout, Panel, ScrollView, TextView}
+    Cursive, align::HAlign, event::Key, theme::{BaseColor, BorderStyle, Color, Palette, PaletteColor, Theme}, traits::*, views::{Dialog, DummyView, EditView, LinearLayout, Panel, ScrollView, TextView}
 };
 
 use serde::{Serialize, Deserialize};
@@ -8,12 +8,10 @@ use serde::{Serialize, Deserialize};
 use chrono::Local;
 
 use tokio::{
-    net::{TcpStream},
-    sync::Mutex,
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader}, net::TcpStream, sync::Mutex
 };
 
-use std::{env, error::Error, process::Child, sync::Arc};
+use std::{env, error::Error, sync::Arc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatMessage{
@@ -98,24 +96,90 @@ async fn main() -> Result<(), Box<dyn Error>> {
     siv.add_fullscreen_layer(centered_layout);
     //adding global key binfings
     siv.add_global_callback(Key::Esc, |s|s.quit()); //ESC to quite
-    siv.add_global_callback("/", |s| {s.call_on_name("input", |view: &mut EditView| {
+    siv.add_global_callback('/', |s| {s.call_on_name("input", |view: &mut EditView| {
         view.set_content("/"); //inserting the "/" in the input box
     });
 });
 
-//Establishing a connection with the server
-//-----------------------------------------
+    //Establishing a connection with the server
+    //-----------------------------------------
+    let stream = TcpStream::connect("127.0.0.1:8082").await?;
+    let (reader, mut writer) = stream.into_split();
+    writer.write_all(format!("{}\n", username).as_bytes()).await?;
 
+    let writer = Arc::new(Mutex::new(writer));
+    let writer_clone = Arc::clone(&writer);
+    siv.set_user_data(writer);
 
+    let reader = BufReader::new(reader);
+    let mut lines = reader.lines();
+    let sink = siv.cb_sink().clone();
 
+    //spawn async task to handle incoming messages.
+    tokio::spawn(async move{
+        while let Ok(Some(line)) = lines.next_line().await{
+            if let Ok(msg) = serde_json::from_str::<ChatMessage>(&line){
+                let formatted_msg = match msg.message_type {
+                    MessageType::UserMessage => format!("{}\n{} | {}\n",
+                        msg.timestamp, msg.username, msg.content),
+                    MessageType::SystemNotification => format!("\n{} {}\n",
+                        msg.username, msg.content),
+                };
 
-
-
-    fn send_messages(s, text){}
+                if sink.send(Box::new(move |siv:&mut Cursive|{
+                    siv.call_on_name("messages", |view:&mut TextView|{
+                        view.append(formatted_msg);
+                    });
+                })).is_err(){
+                    break;
+                }
+            }
+        };
+    });
+    //Run the cursive event loop.
+    siv.run();
+    let _ = writer_clone.lock().await.shutdown().await; //closing the writer.
+    Ok(())
 }
 
 
+fn send_messages(siv: &mut Cursive, msg: String){
+    if msg.is_empty(){
+        return;
+    }
 
+     match msg.as_str(){
+        "/help" => {
+            siv.call_on_name("message", |view: &mut TextView|{
+                view.append("\n=== Commands ===\n/help - show this help\n/clear - Clear messages\n/quit - Exit chat\n\n");
+            });
+            siv.call_on_name("input", |view: &mut EditView|{
+                view.set_content("");
+            });
+            return;
+        }
+        "/clear" => {
+            siv.call_on_name("messages", |view:&mut TextView|{
+                view.set_content("");
+            });
+            siv.call_on_name("input", |view: &mut EditView|{
+                view.set_content("");
+            });
+            return;
+        }
+        "/quit" => {
+            siv.quit();
+            return;
+        }
+        _ => {}
+    }
+
+    let writer = siv.user_data::<Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>>().unwrap().clone();
+    tokio::spawn(   async move {
+        let _ = writer.lock().await.write_all(format!("{}\n", msg).as_bytes()).await;
+    });
+
+}
 
 
 
